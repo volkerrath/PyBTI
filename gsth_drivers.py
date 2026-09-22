@@ -384,6 +384,12 @@ def tikhonov_gsth(
     with fixed regpar0 for iter <= start_regpar, afterwards a grid search of
     the regularisation parameters (GCV/UPR) every modul_regpar-th iteration,
     then a-posteriori quantities from the generalised inverse.
+    A requested GCV/UPR search runs before convergence stopping is enabled.
+    maxiter_inv limits evaluated models, including the initial guess.
+    Model, temperatures, residuals and regpar_iter refer to the same evaluated
+    iterate. The final Jacobian and effective cell conductivity are returned.
+    Objective bookkeeping uses the sum of the three squared penalties, as
+    minimised by the stacked least-squares system.
 
     weight_residual : False = as MATLAB (unweighted residual on the rhs
         with a weighted Jacobian; identical only if Terr == 1); True = use
@@ -402,7 +408,16 @@ def tikhonov_gsth(
     rng = np.random.default_rng(inv.seed)
     m_apr = _prior_vector(inv.m_apr_set, nsteps, rng)
     m = _prior_vector(inv.m_ini_set, nsteps, rng)
+    m_ini = m.copy()
     npar = m.size
+    if inv.maxiter_inv < 1 or inv.modul_regpar < 1 or inv.dp <= 0:
+        raise ValueError("Need maxiter_inv >= 1, modul_regpar >= 1 and dp > 0")
+    if it.size != site.t.size or np.any(it < 0) or np.any(it >= npar):
+        raise ValueError("Inversion it must map every time node to a GST parameter")
+    if np.any(site.Terr <= 0) or not np.isfinite(site.Terr).all():
+        raise ValueError("Observation uncertainties must be positive and finite")
+    if outdir:
+        os.makedirs(outdir, exist_ok=True)
     id_, Tobs, Terr = site.id, site.Tobs, site.Terr
     nobs = id_.size
     if verbose:
@@ -417,6 +432,9 @@ def tikhonov_gsth(
     fm = make_forward_model(site, fwd, it, T0)
     dp = inv.dp
     regpar0 = np.asarray(inv.regpar0, dtype=float)
+    active_regs = regpar0.copy()
+    stop_reason, converged = "iteration_limit", False
+    search_required = str(inv.reg_opt).lower() not in ("f", "fix")
 
     theold = 1.0e6
     regpar_iter = np.zeros((inv.maxiter_inv, 3))
@@ -441,10 +459,12 @@ def tikhonov_gsth(
             )
         hist["m"].append(m.copy())
         hist["r"].append(res.copy())
-        rp = regpar_iter[iiter - 2] if iiter > 1 else regpar0
+        rp = active_regs.copy()
+        regpar_iter[iiter - 1] = rp
         s0, s1, s2 = np.sqrt(rp)
-        Wm = s0 * L0 + s1 * L1 + s2 * L2  # lumped operator, as MATLAB
-        th_m = float(np.linalg.norm(Wm @ (m - m_apr)) ** 2)
+        delta_prior = m - m_apr
+        th_m = float(sum(rp[j] * np.linalg.norm(L @ delta_prior)**2
+                         for j, L in enumerate((L0, L1, L2))))
         th_d = float(np.linalg.norm(Wd @ res) ** 2)
         thenew = float(np.sqrt(th_d / res.size))
         hist["theta_m"].append(th_m)
@@ -471,9 +491,17 @@ def tikhonov_gsth(
             if inv.stop_needs_start_regpar
             else True
         )
-        if (theold - thenew <= inv.tol_inv[1]) and ok_start:
-            break
+        # A warm-up plateau must not prevent the first requested GCV search.
+        ok_start = ok_start and (not search_required or bool(search))
         if (thenew < inv.tol_inv[0]) and ok_start:
+            stop_reason, converged = "rms_target", True
+            break
+        if (theold - thenew <= inv.tol_inv[1]) and ok_start:
+            stop_reason = "rms_increased" if thenew > theold else "rms_stagnation"
+            converged = thenew <= theold
+            break
+        # Return the last evaluated model, never an unevaluated extra update.
+        if iiter == inv.maxiter_inv:
             break
         theold = thenew
 
@@ -505,7 +533,7 @@ def tikhonov_gsth(
 
         if iiter <= inv.start_regpar:
             rl = regpar0
-            regpar_iter[iiter - 1] = rl
+            active_regs = rl.copy()
             dm = nm.gauss_newton_step(
                 Jw,
                 L0,
@@ -577,29 +605,55 @@ def tikhonov_gsth(
             if inv.reg_shift:
                 index = min(max(index + int(inv.reg_shift), 0), val.size - 1)
             m = mL[index].copy()
-            regpar_iter[iiter - 1] = regpar[index]
+            active_regs = regpar[index].copy()
+            search.update(selected_index=index, selected_regpar=active_regs.copy(),
+                          iteration=iiter, criterion=ro)
             if verbose:
                 print(
                     " min(%s) = %g at index: %d  RegPar = %s"
-                    % (ro.upper(), val[index], index + 1, regpar[index])
+                    % (ro.upper(), (GCV if ro in ("g", "gcv") else UPR)[index],
+                       index + 1, regpar[index])
                 )
-        else:  # MATLAB: nothing happens
-            regpar_iter[iiter - 1] = regpar_iter[iiter - 2]
+        else:
+            # Between searches continue updating with the last selected weights.
+            m = m + nm.gauss_newton_step(
+                Jw, L0, L1, L2, m, m_apr, res, active_regs,
+                inv.tol_solve, inv.maxiter_solve,
+                Wd if weight_residual else None,
+            )
 
     # a-posteriori quantities (Nolet-style generalised inverse)
     Rmm = Rdd = Cmm = None
-    regs = regpar_iter[max(iiter - 2, 0)]
+    regs = active_regs
+    # Re-evaluate the Jacobian at the model actually returned.
+    J, _ = nm.sensfdt_pal(
+        site.k, site.kA, site.kB, site.h, site.r, site.c, site.p, site.qb,
+        site.dz, site.ip, site.dt, it, m + site.gts, fm.T0,
+        fwd.theta, fwd.maxitnl, fwd.tolnl, inv.dp, fwd.freeze, site.props,
+        n_jobs=n_jobs, **fwd.kw,
+    )
+    Jw = Wd @ J[id_, :-1]
+    Tcalc, _, _, Tcon, _ = nm.forward_solve(
+        m, site.k, site.kA, site.kB, site.h, site.r, site.c, site.p,
+        site.ip, site.dz, site.qb, site.gts, it, site.dt, fm.T0,
+        fwd.theta, fwd.maxitnl, fwd.tolnl, fwd.freeze, 1, site.props, **fwd.kw,
+    )
     if Jw is not None:
         A, _ = nm._stack_operator(Jw, L0, L1, L2, regs)
         A = A.toarray()
         AtA = A.T @ A
-        Jdag = np.linalg.solve(AtA, Jw.T)
-        Rmm, Rdd, Cmm = Jdag @ Jdag.T, Jdag.T @ Jdag, np.linalg.inv(AtA)
+        try:
+            Cmm = np.linalg.inv(AtA)
+        except np.linalg.LinAlgError:
+            Cmm = np.linalg.pinv(AtA)
+        Jdag = Cmm @ Jw.T
+        Rmm, Rdd = Jdag @ Jdag.T, Jdag.T @ Jdag
 
     m_iter = np.array(hist["m"])
     result = dict(
         m=m,
         m_apr=m_apr,
+        m_ini=m_ini,
         m_iter=m_iter,
         r_iter=np.array(hist["r"]),
         rms_iter=np.array(hist["rms"]),
@@ -615,16 +669,21 @@ def tikhonov_gsth(
         niter=iiter,
         it=it,
         search=search,
+        regpar=regs.copy(), Tcon=Tcon, Tinit=fm.T0.copy(),
+        stop_reason=stop_reason, converged=converged,
+        z=site.z.copy(), t=site.t.copy(), id=id_.copy(),
+        Tobs=Tobs.copy(), Terr=Terr.copy(), qb=site.qb, gts=site.gts,
+        name=name,
     )
     if outdir:
         os.makedirs(outdir, exist_ok=True)
         flat = {k: v for k, v in result.items() if isinstance(v, np.ndarray)}
         np.savez(os.path.join(outdir, "%s_results.npz" % name), **flat)
-        m_last = m_iter[-1]
         for tag, key in (("initial", "m_ini"), ("prior", "m_apr")):
             np.savez(
                 os.path.join(outdir, "%s_%s_out.npz" % (name, tag)),
-                **{key: m_last, "it": it, "dt": site.dt, "t": site.t},
+                **{key: m_ini if tag == "initial" else m_apr,
+                   "it": it, "dt": site.dt, "t": site.t},
             )
         _append_info(
             outdir,

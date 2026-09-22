@@ -9,15 +9,12 @@ MATLAB workflow every step but the last hands its result to the next one
 through a .mat file (name_FwdPar.mat, name_Mesh_in.mat, name_SitePar.mat,
 name_Init.mat); here they are plain function calls and dicts.
 
-The last step (Fwd_gsth.m) is already available as gsth_drivers.fwd_gsth.
-The first step (meshes, SITE_Mesh.m) is mesh.build_meshes, translated
-alongside this file. The middle two steps -- SITE_Prep.m (read/average
-the temperature and conductivity logs into a gsth_drivers.SitePar) and
-SITE_Init.m (build the GSTH prior and the corresponding initial
-temperature profile) -- have NOT been translated yet; run_fwd() below
-takes them as `prep_fn` / `init_fn` callables so this driver is complete
-and runnable now, and the real prep.py / init.py can be plugged in
-without changing this file, once they exist.
+The last step (Fwd_gsth.m) is gsth_drivers.fwd_gsth; mesh generation
+is mesh.build_meshes. This legacy driver retains its prep_fn / init_fn
+callback interface and dataclass containers. The new dictionary-based
+workflow uses prep.py, init.py and workflow.py directly; see WORKFLOW.md
+and examples/A/run_forward.py. Its routines are not drop-in replacements
+for this driver's older callback signatures.
 
 "SITE" -> a real borehole name: nothing here is hard-coded to a
 particular site. `name` is the borehole label used for output file
@@ -75,12 +72,12 @@ def run_fwd(
     props : phys.py property set for this borehole -- a key of
         phys.SITE_PROPS, or a custom mapping (see numeric.PropModel).
     prep_fn : callable(name, mesh, props, **prep_kw) -> gsth_drivers.SitePar
-        Site preparation step (SITE_Prep.m, not yet translated): reads the
+        Legacy site-preparation callback: reads the
         borehole's temperature/conductivity logs, averages them onto the
         depth mesh, and returns the fully populated SitePar (k, kA, kB, h,
         r, c, p, qb, Tobs, id, Terr, ...).
     init_fn : callable(name, site, fwd, mesh, **init_kw) -> dict
-        Initial-value step (SITE_Init.m, not yet translated): builds the
+        Legacy initial-value callback: builds the
         GST history prior (equilibrium, step or point-interpolated GSTH)
         and the corresponding initial temperature profile by iterating
         heat1dnt to a self-consistent state. Must return a dict with keys
@@ -160,8 +157,7 @@ def run_fwd(
 
 # ---------------------------------------------------------------------------
 # self-test: end-to-end run with a synthetic prep_fn / init_fn, so this
-# driver is verified to work today, ahead of the real SITE_Prep / SITE_Init
-# translations.
+# driver is verified to work today, independently of the dictionary workflow.
 # ---------------------------------------------------------------------------
 def _demo_prep_fn(name, mesh, props, qb=-0.045, gts=0.0, noise=0.05, seed=0):
     """Stand-in for SITE_Prep.m: builds a SitePar with a uniform synthetic

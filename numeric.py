@@ -926,7 +926,7 @@ def forward_solve(
 
     GST = m + gts; if T0 is None the initial state is the stationary
     solution for surface temperature GST[0].
-    Returns (Tcalc (nz,nt), dT, Q, K).
+    Returns (Tcalc (nz,nt), dT, Q, K, ice_porosity).
     """
     GST = np.asarray(m, dtype=float).ravel() + gts
     if T0 is None:
@@ -1437,12 +1437,13 @@ def solvereg(
     T_loc = forward(m_loc)
     r_loc = np.asarray(Tobs, dtype=float).ravel() - T_loc[id]
     s0, s1, s2 = np.sqrt(np.asarray(regpar, dtype=float))
-    Wm = s0 * L0 + s1 * L1 + s2 * L2
-    theta_m = float(np.linalg.norm(Wm @ (m_loc - m_apr)) ** 2)
+    delta_prior = m_loc - m_apr
+    theta_m = float(sum(regpar[j] * np.linalg.norm(L @ delta_prior)**2
+                        for j, L in enumerate((L0, L1, L2))))
     wr = Wd @ r_loc
     theta_d = float(np.linalg.norm(wr) ** 2)
     r_norm = float(np.linalg.norm(wr))
-    m_norm = float(np.linalg.norm(Wm @ (m_loc - m_apr)))
+    m_norm = float(np.sqrt(theta_m))
     reg = np.asarray(regpar, dtype=float)
     AtA = (
         Jw.T @ Jw

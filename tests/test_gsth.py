@@ -14,6 +14,7 @@ Status         : AI-generated test code; review before production use.
 import os
 import sys
 import tempfile
+from unittest import SkipTest
 
 import numpy as np
 from scipy.special import erfc
@@ -179,8 +180,7 @@ def test_mcmc_short_run():
         import gsth_mcmc as gm
         from pymcmcstat.MCMC import MCMC  # noqa: F401
     except ImportError as e:
-        print("   skipped (pymcmcstat not importable: %s)" % e)
-        return
+        raise SkipTest("Optional pymcmcstat not importable: %s" % e) from e
     site, fwd, it, mtrue, fm = _synthetic_site(noise=0.02)
     # coarse 4-parameter GST history + QB + H ('gauss' layout)
     z, dz = site.z, site.dz
@@ -213,6 +213,10 @@ if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
             print("%-48s" % name, end="", flush=True)
-            fn()
-            print(" ok")
-    print("all tests passed")
+            try:
+                fn()
+            except SkipTest as exc:
+                print(" skipped: %s" % exc)
+            else:
+                print(" ok")
+    print("all available tests passed")

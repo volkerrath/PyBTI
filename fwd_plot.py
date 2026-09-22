@@ -10,7 +10,7 @@ plot_fwd(); all plotted values come from the supplied forward run.
 This is a new forward-model plotting module, not a translation of
 SITE_Plot.m (which plots MCMC posterior results and is a separate task).
 It follows the existing modules' function/dict interface and docstring
-structure. Requires Python 3.11, NumPy and Matplotlib; the demonstration
+structure. Requires Python 3.12, NumPy and Matplotlib; the demonstration
 also uses the existing forward-model modules and SciPy.
 
 Time follows the solver's convention: t is in seconds relative to the
@@ -69,7 +69,8 @@ def plot_fwd(
 
     Parameters
     ----------
-    run : dict returned by fwd_driver.run_fwd.
+    run : dict returned by fwd_driver.run_fwd or the dictionary workflow.
+        site may be a MATLAB-style dictionary or an existing SitePar.
         Uses name, site, mesh, init and result. result['Tcalc'] must have
         shape (number of depth nodes, number of time nodes), as returned
         by gsth_drivers.fwd_gsth. init['it'] (or mesh['it'] if omitted)
@@ -102,7 +103,7 @@ def plot_fwd(
     """
     result, site = run["result"], run["site"]
     z = np.asarray(result["z"], dtype=float).ravel()
-    t = np.asarray(site.t, dtype=float).ravel()
+    t = np.asarray(site["t"] if isinstance(site, dict) else site.t, dtype=float).ravel()
     temperature = np.asarray(result["Tcalc"], dtype=float)
     gst = np.asarray(run["init"]["GST"], dtype=float).ravel()
     pointer = np.asarray(run["init"].get("it", run["mesh"]["it"])).ravel()
@@ -133,7 +134,7 @@ def plot_fwd(
     if zobs is None:
         zobs = z[np.asarray(result["id"], dtype=int).ravel()]
     zobs = np.asarray(zobs, dtype=float).ravel()
-    errors = np.asarray(site.Terr, dtype=float).ravel()
+    errors = np.asarray(site["Terr"] if isinstance(site, dict) else site.Terr, dtype=float).ravel()
     residual = np.asarray(result["r"], dtype=float).ravel()
     if not (observed.size == zobs.size == errors.size == residual.size):
         raise ValueError("Tobs, zobs, Terr and r must have equal lengths.")

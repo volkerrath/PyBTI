@@ -1,3 +1,7 @@
+UPDATE: prep.py, init.py and workflow.py now provide a dictionary-based
+workflow and both initialisation modes. See WORKFLOW.md. The notes below
+describe the earlier callback-based driver and its synthetic stand-ins.
+
 SITE_Mesh.m / SITE_Fwd.m -> Python (mesh.py, fwd_driver.py)
 =============================================================
 Author: Claude (Anthropic), generated 2026-09-22. AI-generated; run

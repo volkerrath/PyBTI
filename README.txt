@@ -1,3 +1,10 @@
+CURRENT DICTIONARY WORKFLOW
+---------------------------
+See WORKFLOW.md: prep.py reads and prepares data; init.py implements
+steady-state and repeated-GSTH initialisation; workflow.py passes MATLAB-
+style dictionaries between all stages. examples/A/run_forward.py is the
+complete synthetic forward example. Earlier translation notes follow.
+
 GSTH / borehole temperature modelling - Python translation of src_for_claude
 ============================================================================
 Author: Claude (Anthropic), generated 2026-09-21. AI-generated; tested against
@@ -6,6 +13,7 @@ Review before production use.
 
 FILES
 -----
+tikh_plot.py      SITE_TikhPlot diagnostics; notebook steps 10-14 run inversion
 fwd_plot.py       plot_fwd(run_fwd output): paleoclimate, temperatures, residuals
 numeric.py        callable numerical core (forward models, Jacobians,
                   regularisation, grids, GST builders, filters, statistics)
@@ -18,7 +26,13 @@ phys.py           NOT included - your file; must sit next to numeric.py.
 
 QUICK START
 -----------
-Python target for ongoing work: 3.11.
+Python target for ongoing work: 3.12.
+Create the dedicated environment with:
+    conda env create --file BTI.yaml
+    conda activate BTI
+    python -m pytest -q tests
+BTI.yaml pins the direct scientific dependencies; it excludes the optional
+pymcmcstat sampler pending the later MCMC work. See README.md.
 
 Forward-model plotting (NumPy and Matplotlib):
     from fwd_plot import plot_fwd
@@ -103,7 +117,8 @@ prctile, quantile (numpy), splfit/splval/ppdiff (scipy.interpolate), mstruct,
 str2strs, mdir. Third-party / not project-specific and not translated:
 smoothn, idctn (Garcia), hmf (image filter), lbas (Hansen), slidefun,
 vtkwrite, textloc, spread. MATLAB dev tools: depfun, mydepfun, package,
-archive. Plot scripts TikhPlot, Tikh_plot, TikhPlotOrig, set_graphpars
+archive. SITE_TikhPlot.m is now adapted in tikh_plot.py. Other plot scripts
+TikhPlot, Tikh_plot, TikhPlotOrig, set_graphpars
 (TikhPlot/Tikh_plot contain syntax errors, e.g. "tauval =" and "100000Plot").
 GSTH_MCPrior.m contains only a path string (priors are the mu/sigma of the
 parameters, see make_params).
@@ -130,21 +145,21 @@ Kept as in MATLAB but questionable (please review):
     problem, Terr=0.01, rms 116 -> 108 (literal) vs 116 -> 0.5 and GST
     recovered to 0.05 K (weight_residual=True). Default is the literal
     behaviour; weight_residual=True is recommended.
- b. theta_m uses the SUM of the operators sqrt(t1)L0+sqrt(t2)L1+sqrt(t3)L2,
-    not the sum of the three separate norms.
+ b. Corrected for the notebook inversion: theta_m now sums the three
+    separate squared penalties, matching the minimised stacked system.
  c. UPR: 2*|Terr|^2*tr(M)/nd with |Terr| the 2-norm of the whole vector.
  d. heat1dnt outputs dT, Q are computed from the INITIAL profile T0.
  e. set_prior writes the smoothed value to index k-L (shift by L samples).
  f. heat1dnt sets Tlast(1)=GST(1) at the start (also in restarted Jacobian
     runs); irrelevant for theta = 1, O(tolnl) effect otherwise.
  g. CovarGauss returns C*diag(s^2) (not symmetric); resmat 'Rm' is G*G'.
- h. modul_regpar > 1: iterations without regpar search do nothing, so the
-    next iteration sees zero improvement and stops.
+ h. Corrected: iterations between regularisation searches update with the
+    last selected weights; convergence waits for the first requested search.
  i. rms_L in the regpar loop used length(scalar); now r_norm/sqrt(nobs).
 
 ENVIRONMENT NOTES
 -----------------
-pymcmcstat 1.9.1 (the zip you supplied) and current SciPy/NumPy:
+Historical notes for the optional pymcmcstat 1.9.1 (not in BTI.yaml):
  - plotting/utilities.py: "from scipy import pi, sin, cos" fails on recent
    SciPy. Change to "from numpy import pi, sin, cos" (or use older SciPy).
  - updatesigma=True fails with NumPy >= 2 (array assigned to scalar).
