@@ -61,6 +61,7 @@ from gsth_drivers import FwdPar, SitePar
 
 __all__ = [
     "McmcContext",
+    "_prepare_pymcmcstat_import",
     "objfun_basic",
     "objfun_gauss",
     "objfun_joint",
@@ -75,8 +76,17 @@ __all__ = [
 ]
 
 
+def _prepare_pymcmcstat_import():
+    """Restore SciPy aliases imported by the unmaintained 1.9.1 release."""
+    import scipy
+
+    for name in ("pi", "sin", "cos"):
+        if not hasattr(scipy, name):
+            setattr(scipy, name, getattr(np, name))
+
+
 def _apply_pymcmcstat_compat():
-    """Runtime shim for pymcmcstat 1.9.1 with NumPy >= 2.
+    """Runtime shim for pymcmcstat 1.9.1 with current NumPy.
 
     Its error-variance update (used when updatesigma=True) assigns arrays
     into scalar slots, which recent NumPy rejects. The shim replaces
@@ -328,6 +338,7 @@ def run_mcmc(
     only, as pymcmcstat), chain_full (all parameters; fixed ones at their
     theta0 - use this for predict_chain), s2chain, names, namei, mcstat).
     """
+    _prepare_pymcmcstat_import()
     try:
         from pymcmcstat.MCMC import MCMC
     except ImportError as e:  # pragma: no cover
@@ -355,6 +366,9 @@ def run_mcmc(
         nsimu=5000, method="dram", updatesigma=True, waitbar=False, verbosity=1
     )
     opts.update(options or {})
+    # pymcmcstat indexes drscale as a sequence for delayed-rejection stages.
+    if "drscale" in opts and np.isscalar(opts["drscale"]):
+        opts["drscale"] = [float(opts["drscale"])]
     mc.simulation_options.define_simulation_options(**opts)
     ms = dict(sos_function=make_ssfun(ctx, layout))
     for key, val in (("sigma2", sigma2), ("N0", N0), ("S20", S20)):
@@ -374,6 +388,7 @@ def run_mcmc(
         chain=chain,
         chain_full=full,
         s2chain=np.asarray(res["s2chain"]),
+        sschain=np.asarray(res.get("sschain", [])),
         names=list(res["names"]),
         namei=namei,
         mcstat=mc,
@@ -408,7 +423,9 @@ def _job(args):
     return dict(
         job=job,
         chain=r["chain"],
+        chain_full=r["chain_full"],
         s2chain=r["s2chain"],
+        sschain=r["sschain"],
         names=r["names"],
         namei=r["namei"],
     )
@@ -416,7 +433,7 @@ def _job(args):
 
 def run_jobs(jobs, name, ctx, params, options=None, n_jobs=1, **kw):
     """Run several independent chains (one per job number), optionally in
-    parallel processes. Returns a list of dicts (chain, s2chain, names)."""
+    parallel processes. Returns a list of serialisable chain dictionaries."""
     tasks = [(j, name, ctx, params, options, kw) for j in jobs]
     if n_jobs and n_jobs > 1:
         with ProcessPoolExecutor(max_workers=int(n_jobs)) as ex:

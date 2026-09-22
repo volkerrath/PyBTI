@@ -3,8 +3,8 @@ workflow.py -- Dictionary interfaces for the borehole modelling workflow.
 
 Public routines pass plain dictionaries corresponding to MATLAB mesh,
 sitepar, fwdpar, initpar and invpar structures. The older dataclass-based
-drivers remain available; conversion occurs only at the inversion solver
-boundary. No files or figures are generated unless explicitly requested.
+drivers remain available; conversion occurs only at numerical solver
+boundaries. No files or figures are generated unless explicitly requested.
 
 Provenance notice
 Author         : Codex (OpenAI)
@@ -22,9 +22,13 @@ import numeric as nm
 import mesh as gmesh
 import gsth_drivers as gd
 from init import _forcing, _transient, _numerics
+from mcmc_workflow import (
+    build_mcmc, run_mcmc, summarize_mcmc, plot_mcmc,
+)
 
 __all__ = ["build_mesh", "build_inversion", "run_forward", "run_inversion",
-           "plot_forward", "plot_inversion"]
+           "plot_forward", "plot_inversion", "build_mcmc", "run_mcmc",
+           "summarize_mcmc", "plot_mcmc"]
 
 
 def build_mesh(meshpar: dict, observations: dict | None = None):

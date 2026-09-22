@@ -53,12 +53,12 @@ def test_time_mesh_log_matches_set_mesh():
     assert m["tm"].size == m["nt"] - 1
 
 
-def test_run_fwd_end_to_end_and_self_consistency():
+def test_run_fwd_end_to_end_and_self_consistency(tmp_path):
     out = run_fwd("TESTBORE", "full", _demo_prep_fn, _demo_init_fn,
                   mesh_kw=dict(depth_kw=dict(zend=1500.0, nz=121),
                               time_kw=dict(tstart=5000 * Y, tend=1.0 * Y,
                                           nt=61)),
-                  verbose=False)
+                  outdir=str(tmp_path), verbose=False)
     assert out["name"] == "TESTBORE"
     r = out["result"]
     assert r["Tcalc"].shape[0] == out["mesh"]["nz"]
@@ -69,7 +69,7 @@ def test_run_fwd_end_to_end_and_self_consistency():
     site.Tobs = r["Tcalc"][r["id"], -1].copy()
     r2 = gd.fwd_gsth(site, out["fwd"], out["init"]["GST"],
                      out["init"]["it"], Tinit=out["init"]["Tinit"],
-                     verbose=False)
+                     outdir=str(tmp_path), verbose=False)
     assert r2["rms"] < 1e-8 and r2["mae"] < 1e-8
 
 

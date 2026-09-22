@@ -63,4 +63,4 @@ SOURCE NOTES (SITE_Fwd.m)
   as fwd.relaxnl_unused for the record, not passed into the solver.
 - `run_parallel`/`parcors` (MATLAB, for later parfor use) are not used by
   SITE_Fwd.m itself and are not part of this driver; they belong with the
-  MCMC driver (SITE_MCMC.m, not yet translated).
+  MCMC driver, now exposed through the SITE_MCMC.m dictionary adapter.

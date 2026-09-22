@@ -4,7 +4,7 @@ test_gsth.py -- self-tests for numeric.py, gsth_drivers.py, gsth_mcmc.py.
 Run from the package directory (phys.py must be next to numeric.py):
     python tests/test_gsth.py          or          pytest -q tests
 
-The MCMC test is skipped when pymcmcstat cannot be imported.
+The MCMC test uses the pymcmcstat dependency pinned in BTI.yaml.
 
 Provenance notice
 Author         : Claude (Anthropic)
@@ -178,6 +178,7 @@ def test_mat_loader_roundtrip():
 def test_mcmc_short_run():
     try:
         import gsth_mcmc as gm
+        gm._prepare_pymcmcstat_import()
         from pymcmcstat.MCMC import MCMC  # noqa: F401
     except ImportError as e:
         raise SkipTest("Optional pymcmcstat not importable: %s" % e) from e

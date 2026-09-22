@@ -20,6 +20,10 @@ argument lists. The older dataclass interfaces and callback-based
 | `workflow.build_inversion` | mesh, `gridpar`, `invpar` | validated inversion GST mapping and controls |
 | `workflow.run_inversion` | `sitepar`, `fwdpar`, `invpar`, initialisation result, optional `runpar` | Tikhonov result and diagnostics |
 | `workflow.plot_inversion` | inversion result or list, `plotpar` | GST, temperature, residual, heat-flow, RMS and GCV plots |
+| `workflow.build_mcmc` | `sitepar`, `fwdpar`, inversion grid, initialisation, optional `mcmcpar` | validated GST/Q/H priors, bounds and DRAM controls |
+| `workflow.run_mcmc` | dictionaries above plus MCMC configuration and optional `runpar` | raw sampled/full chains and variance chain |
+| `workflow.summarize_mcmc` | chain(s), model dictionaries, optional `summarypar` | retained posterior, predictions, residuals and quantiles |
+| `workflow.plot_mcmc` | posterior summary, optional `plotpar` | SITE_MCMCPlot/SITE_Plot diagnostic figure |
 | `workflow.plot_forward` | run result, `plotpar` | figure, axes, optional filename |
 
 Reading raw data first lets the mesh include observation depths. The mesh
@@ -110,9 +114,9 @@ Independent and exponential noise are also supported. A fixed seed makes
 the realisation repeatable. The covariance and realised noise are returned.
 
 The forward RMS uses marginal uncertainties, as the existing driver does.
-The dictionary inversion adapter rejects off-diagonal covariance rather
-than silently ignoring it: the current Tikhonov solver supports diagonal
-weighting only. It enables consistent residual weighting. The notebook now
+The dictionary inversion adapters reject off-diagonal covariance rather
+than silently ignoring it: the current Tikhonov and MCMC paths require diagonal
+observation covariance. Tikhonov enables consistent residual weighting. The notebook now
 provides explicit `invpar` settings from `templates/SITE_Tikh.m`, mapped by
 `build_inversion`; it does not claim to reconstruct the missing SYNA_InvPar file.
 
@@ -139,8 +143,9 @@ initial and prehistory temperatures are explicit assumptions consistent
 with the file's background profile. Equilibrium is the default; periodic
 initialisation and artificial noise are optional.
 
-This is a runnable forward example, not a reproduction of the missing
-MATLAB inversion setup. No MCMC plotting is added.
+This command-line example remains focused on forward modelling. The notebook
+adds explicit Tikhonov and MCMC settings instead of inferring a missing SYNA
+inversion file.
 
 
 ## Monitor repeated-history initial conditions
@@ -248,3 +253,40 @@ over every cell between data depths. Time has no arbitrary calendar shift;
 a symlog axis retains age zero. Returned Cmm is an inverse regularised local
 Hessian, not a complete uncertainty estimate; legacy Rmm/Rdd definitions are
 retained and are not labelled as model/data resolution matrices.
+
+
+## MCMC inversion in the notebook
+
+Steps 15–18 use the same 21-bin GST grid as Tikhonov and the Gaussian layout
+from `SITE_MCMC.m`: `[GST_1 ... GST_21, QB, H]`. QB is positive upward in
+mW/m²; H is in µW/m³. The configuration retains the template's GST/H priors,
+three-sigma bounds, Gaussian proposal correlation length 3, DRAM scale 2,
+`updatesigma=True`, likelihood starting sigma 0.1 K and `pom=-4 K`. Its QB
+prior mean comes from the current site's signed `qb` instead of the template's
+OKU-specific value.
+
+```python
+mcmcpar = build_mcmc(sitepar, fwdpar, invpar, initial, dict(
+    method="dram", nsimu=1000, adaptint=200,
+    sample_qb=True, sample_h=True,
+    activate_qb=True, activate_h=False,
+))
+chain = run_mcmc(sitepar, fwdpar, initial, mcmcpar,
+                 dict(job=1, name="site_validation", outdir="results/chains"))
+posterior = summarize_mcmc(chain, sitepar, fwdpar, initial,
+                           dict(burnin=.25, nsample=100, outdir="results"))
+figure = plot_mcmc(posterior, dict(outdir="results"))
+```
+
+`sample_h=True` and `activate_h=False` deliberately reproduce MATLAB `Pact`:
+H moves in the chain but does not enter the temperature objective, so its
+posterior is not data identified. The Gaussian objective recalculates a steady
+initial profile at `GST_1 + pom` for each proposal; it records but does not use
+the workflow's repeated-history `Tinit`.
+
+The notebook executes only 120 samples as an integration check. The retained
+`production_nsimu=250000` and DRAM adaptation interval 10,000 come from the
+MATLAB template. Use several independent job seeds and convergence/ESS checks
+before interpreting posterior intervals. The plotting adapter removes the
+13.5-year shift, corrects QB/H/RMS labels and retains age zero with a symlog
+axis.

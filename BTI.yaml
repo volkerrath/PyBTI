@@ -17,5 +17,7 @@ dependencies:
   - jupyterlab>=4,<5
   - ipykernel>=6,<8
   - nbclient>=0.10,<1
-# pymcmcstat is optional and deferred to the MCMC workflow.
-# It is not needed for forward modelling, initialisation, or Tikhonov inversion.
+  - pip
+  - pip:
+      # DRAM implementation used by the SITE_MCMC.m translation.
+      - pymcmcstat==1.9.1

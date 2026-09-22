@@ -14,6 +14,8 @@ Review before production use.
 FILES
 -----
 tikh_plot.py      SITE_TikhPlot diagnostics; notebook steps 10-14 run inversion
+mcmc_workflow.py  dictionary MCMC build/run/summary adapter
+mcmc_plot.py      SITE_MCMCPlot/SITE_Plot posterior diagnostics
 fwd_plot.py       plot_fwd(run_fwd output): paleoclimate, temperatures, residuals
 numeric.py        callable numerical core (forward models, Jacobians,
                   regularisation, grids, GST builders, filters, statistics)
@@ -31,8 +33,8 @@ Create the dedicated environment with:
     conda env create --file BTI.yaml
     conda activate BTI
     python -m pytest -q tests
-BTI.yaml pins the direct scientific dependencies; it excludes the optional
-pymcmcstat sampler pending the later MCMC work. See README.md.
+BTI.yaml pins the direct scientific dependencies and installs
+pymcmcstat==1.9.1 through pip for the DRAM workflow. See README.md.
 
 Forward-model plotting (NumPy and Matplotlib):
     from fwd_plot import plot_fwd
@@ -48,7 +50,7 @@ The paleoclimate panel shows GST[it[j]] applied over each model time
 interval, matching heat1dnt; time is years before the model reference,
 not an assumed calendar epoch. Temperatures are in degrees C; residuals
 are observed minus calculated in K. The annotated RMS is normalised by
-the observation errors. SITE_Plot.m is for MCMC and remains untranslated.
+the observation errors. SITE_Plot.m and SITE_MCMCPlot.m are adapted in mcmc_plot.py.
 
     from gsth_drivers import SitePar, FwdPar, InvPar, tikhonov_gsth
     import numeric as nm
@@ -159,14 +161,14 @@ Kept as in MATLAB but questionable (please review):
 
 ENVIRONMENT NOTES
 -----------------
-Historical notes for the optional pymcmcstat 1.9.1 (not in BTI.yaml):
+Compatibility notes for pymcmcstat 1.9.1 (installed by BTI.yaml):
  - plotting/utilities.py: "from scipy import pi, sin, cos" fails on recent
    SciPy. Change to "from numpy import pi, sin, cos" (or use older SciPy).
  - updatesigma=True fails with NumPy >= 2 (array assigned to scalar).
    gsth_mcmc applies a runtime shim (same distribution, different random
    stream); the pymcmcstat sources are not modified.
- - The tests here used stand-ins for h5py / mcmcplot / statsmodels (not
-   installable offline); with a normal "pip install pymcmcstat" they exist.
+ - The current BTI environment installs the package and dependencies normally;
+   focused and dictionary end-to-end sampler tests run without stand-ins.
 Runtime: ~0.3 s per forward run (400 time steps, 120 cells, permafrost on).
 MCMC cost = nsimu x that.
 

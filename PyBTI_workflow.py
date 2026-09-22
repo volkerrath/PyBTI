@@ -18,7 +18,7 @@
 #
 # Read input data → generate the mesh → assign material properties → build the ground
 # surface temperature history (GSTH) → generate initial conditions → optionally run a
-# separate forward simulation → save results.
+# separate forward simulation → Tikhonov inversion → result plots and saved results.
 #
 # All modelling steps call the existing Python modules and pass MATLAB-style
 # dictionaries. The mesh is the first **generated model input**; raw data are read
@@ -27,7 +27,8 @@
 # **Start here:** activate the `BTI` Conda environment, open this notebook with its
 # kernel, and run all cells from the top. Change the **initialisation dictionary in
 # step 1** to choose `"equilibrium"` or `"periodic"`. Restart and run all cells after
-# changing parameters. MCMC and its result plots remain a later task.
+# changing parameters. Tikhonov inversion runs in steps 10–13 using SITE_Tikh.m settings.
+# The final sections run Tikhonov and a short MCMC validation workflow.
 #
 # Provenance: Codex (OpenAI), 2026-09-22. Uses the existing MATLAB translations;
 # validated on synthetic cases, not against MATLAB output or measured boreholes.
@@ -397,28 +398,425 @@ print(f"Parameter record: {settings_file}")
 
 # -
 
-# ## 10. Later stages: measured data and inversion
-# For measured borehole data, change `datapar["file"]`, the column mapping and
-# depth range; set `synthetic=False`, omit `noise`, and provide measured
-# uncertainties through `Terr` or `errcol`. Change material properties, basal
-# heat flow and the GST history to suit the site. Extend the depth mesh as needed
-# and keep it at least 5,000 m deep.
+# ## 10. Configure Tikhonov inversion — SITE_Tikh.m
+# This now runs after initialisation. The initial profile `Tinit`, material
+# properties and basal heat flow are **fixed** during each inversion. The unknowns
+# are 21 piecewise-constant GST parameters. Initialisation's full time-node GST
+# mapping and the coarser inversion mapping are separate.
 #
-# The existing Tikhonov adapter uses the same dictionary interface:
+# The settings below come from `templates/SITE_Tikh.m`: a logarithmic grid from
+# 110,000 to 30 years, prior and starting parameter values of 1, finite-difference
+# step 0.001 K, five warm-up updates, and 48 first-difference regularisation
+# weights from 10⁻³ to 10³. The synthetic site's `gts=0` makes the parameter
+# values absolute °C. For nonzero `gts`, the solver uses `GST = m + gts`.
 #
-# ```python
-# from workflow import run_inversion
+# The template's OKU site name, material model, GST file and basal heat-flow sweep
+# are not applied to synthetic A. Its heat-flow experiment is available in step 14.
+# The known GSTH is displayed for comparison and used for the chosen initialisation;
+# it is **not** copied into the inversion prior.
 #
-# # Supply a complete, independently chosen invpar dictionary first.
-# # Its GST parameter mapping is distinct from the forcing's interval mapping.
-# inversion = run_inversion(sitepar, fwdpar, invpar, initial)
-# ```
+# Implementation details that affect interpretation:
+# - Observation residuals and Jacobian are both weighted by `1 / Terr`.
+# - `regpar0` supplies warm-up weights. `regbase=(1,1,1)` preserves all three
+#   candidate columns; it does not mask the first-difference search.
+# - `tol_inv` follows the existing solver's order: RMS target, then minimum RMS
+#   improvement (the MATLAB template comment describes the opposite order).
+# - Full updates implement the template's `relax=1`; unused relaxation-scheduler
+#   fields are not passed. Only FD sensitivities are implemented.
+# - Convergence checks wait until a requested GCV search has occurred.
+#   `maxiter_inv` counts evaluated models, including the starting guess.
+# - Regularisation penalises differences between GST parameter values; it does
+#   not divide by the unequal time-bin lengths, matching the translated operators.
 #
-# This cell is documentation, not an automatic inversion: the synthetic folder
-# does not supply the missing SYNA_InvPar configuration. The current inversion
-# solver requires diagonal observational covariance; correlated-noise covariance
-# is rejected. MCMC configuration and SITE_Plot remain deferred.
+
+# +
+from workflow import build_inversion, run_inversion, plot_inversion
+
+invgridpar = dict(
+    nsteps=21, base=0.0, tstart=110000 * YEAR2SEC, tend=30 * YEAR2SEC, gmode="log",
+)
+inv_settings = dict(
+    m_apr_set=1.0, m_ini_set=1.0,
+    diffmeth="FD", dp=0.001,
+    tol_solve=1e-5, maxiter_solve=32,
+    tol_inv=(1e-4, 1e-5), maxiter_inv=100,
+    reg_opt="GCV", start_regpar=5, modul_regpar=1,
+    regpar0=(1.0, 0.0, 0.0), regbase=(1.0, 1.0, 1.0),
+    reg0par=[0.01], reg1par=np.logspace(-3.0, 3.0, 48), reg2par=[0.0],
+    reg_shift=0, outsteps=False, seed=0,
+)
+invpar = build_inversion(mesh, invgridpar, inv_settings)
+INV_OUTPUT = OUTPUT / "tikhonov"
+invrunpar = dict(outdir=INV_OUTPUT, name="SYNA_GCV", verbose=True, n_jobs=1)
+
+# None uses only the synthetic site's specified basal heat flow.
+# Optional SITE_Tikh.m experiment:
+# heatflow_experiment["qb_values"] = [-36e-3, -38e-3, -40e-3, -42e-3, -44e-3]
+heatflow_experiment = dict(qb_values=None)
+
+print(f"Inversion: {invpar['nsteps']} GST parameters; "
+      f"{len(sitepar['Tobs'])} observations; qb={sitepar['qb']*1000:.3f} mW/m²")
+print("Integration intervals per parameter:",
+      np.bincount(invpar["it"][:-1], minlength=invpar["nsteps"]))
+print(f"GCV candidates: {len(inv_settings['reg1par'])}")
+if np.any(sitepar["Tcov"] - np.diag(np.diag(sitepar["Tcov"]))):
+    raise ValueError("Tikhonov currently requires diagonal Tcov. "
+                     "Disable correlated synthetic noise or use independent noise.")
+
+# -
+
+# ## 11. Run the inversion
+# The objective combines squared, uncertainty-weighted temperature residuals with
+# zeroth-, first- and second-difference penalties relative to the prior. GCV selects
+# the regularisation candidate during each scheduled search.
 #
-# See [WORKFLOW.md](WORKFLOW.md), [init.py](init.py) and [BTI.yaml](BTI.yaml)
-# for the interfaces and environment.
+# The printed RMS is **dimensionless**. A separate unweighted RMSE in K is reported
+# below. These are inversion/data-fit diagnostics, unlike the successive-profile
+# norms used to check periodic initialisation.
+#
+# Recovering the known history exactly is not guaranteed: the inverse problem is
+# ill-conditioned, the synthetic file was generated separately, and the inversion
+# is conditional on the selected initial profile and fixed basal heat flow.
+#
+
+# +
+inversion = run_inversion(sitepar, fwdpar, invpar, initial, invrunpar)
+residual = sitepar["Tobs"] - inversion["Tcalc"][sitepar["id"], -1]
+np.testing.assert_allclose(inversion["r_iter"][-1], residual)
+np.testing.assert_array_equal(inversion["m"], inversion["m_iter"][-1])
+print(f"Stop reason: {inversion['stop_reason']}; "
+      f"evaluated models: {inversion['niter']}")
+print(f"Weighted RMS: {inversion['rms_iter'][0]:.6g} → "
+      f"{inversion['rms_iter'][-1]:.6g}")
+print(f"Temperature RMSE: {np.sqrt(np.mean(residual**2)):.6g} K")
+print("Final weights (tau0, tau1, tau2):", inversion["regpar"])
+
+search = inversion["search"]
+if search:
+    selected = search["selected_index"]
+    candidate = search["regpar"][selected]
+    for j in range(3):
+        values = np.unique(search["regpar"][:, j])
+        if values.size > 1 and candidate[j] in (values[0], values[-1]):
+            print(f"GCV selected a boundary of the tau{j} search range "
+                  f"({candidate[j]:.6g}); consider extending that range "
+                  "before interpreting it as an interior optimum.")
+else:
+    print("No GCV search was completed; check maxiter_inv and start_regpar.")
+
+# -
+
+# ## 12. Plot results — SITE_TikhPlot.m
+# The main template panels are recovered GSTH, observed-minus-calculated
+# temperature residuals, and conductivity × temperature gradient. Temperature-fit,
+# iteration-RMS and GCV panels are added to make the inversion inspectable.
+#
+# Corrections to the plotting template:
+# - Use age before the model reference; omit the arbitrary 13.5-year shift.
+# - A symmetric-log age axis includes the present, with a 10-year linear region.
+# - Label apparent upward heat flow in **mW/m²**, not K/km.
+# - Use effective conductivity from the final model. Between sparse data depths,
+#   use a thickness-weighted harmonic conductivity over all intervening cells.
+# - Smooth only data-derived heat flow with the template's 21-point mirrored
+#   boxcar; temperature observations and residuals remain unsmoothed.
+# - No site-specific depth/temperature clipping is imposed.
+# - `Cmm` is a local inverse regularised Hessian conditional on the fixed setup;
+#   it is not displayed as a complete posterior uncertainty band.
+#
+# For the default periodic synthetic A run, the recovered history is oscillatory
+# despite a small temperature residual, and GCV chooses the smallest tested tau1.
+# This is a data-fit result, not evidence of unique or accurate paleoclimate
+# recovery. The displayed known history makes the mismatch visible; the template
+# search range is retained rather than silently tuned to that history.
+#
+
+tikh_plotpar = dict(
+    name="SYNA_GCV", outdir=INV_OUTPUT, formats=("png", "pdf"),
+    show=False, time_scale="symlog", smooth_window=21,
+    reference=dict(t=mesh["t"], GST=forcing["GST"], it=forcing["it"]),
+)
+inversion_plot = plot_inversion(inversion, tikh_plotpar)
+display(inversion_plot["figure"])
+plt.close(inversion_plot["figure"])
+print("Saved figures:")
+for path in inversion_plot["filenames"]:
+    print(path)
+
+
+# ## 13. Save inversion settings, history and the recovered GST grid
+# The driver saves numerical result arrays plus the actual starting and prior
+# parameter vectors. The following files additionally record the complete settings,
+# stopping reason, last GCV search and readable iteration/GST tables.
+#
+# `m_iter[j]`, `r_iter[j]`, `rms_iter[j]` and `regpar_iter[j]` all refer to the
+# same evaluated model. Saved final temperatures and the final Jacobian correspond
+# to the returned final `m`, including when the iteration limit is reached.
+#
+
+iteration_table = np.column_stack((
+    np.arange(inversion["niter"]), inversion["rms_iter"],
+    inversion["theta_d_iter"], inversion["theta_m_iter"],
+    inversion["regpar_iter"],
+))
+np.savetxt(
+    INV_OUTPUT / "SYNA_GCV_iterations.csv", iteration_table, delimiter=",",
+    header="iteration,weighted_rms,theta_data,theta_model,tau0,tau1,tau2", comments="",
+)
+grid_rows = []
+for j in range(invpar["nsteps"]):
+    intervals = np.flatnonzero(invpar["it"][:-1] == j)
+    grid_rows.append((
+        j, -mesh["t"][intervals[0]] / YEAR2SEC,
+        -mesh["t"][intervals[-1] + 1] / YEAR2SEC,
+        inversion["m"][j] + sitepar["gts"],
+        inversion["m_apr"][j] + sitepar["gts"],
+    ))
+np.savetxt(
+    INV_OUTPUT / "SYNA_GCV_GST.csv", grid_rows, delimiter=",",
+    header="parameter,oldest_age_yr,youngest_age_yr,recovered_GST_degC,prior_GST_degC",
+    comments="",
+)
+search_arrays = {key: value for key, value in inversion["search"].items()
+                 if isinstance(value, np.ndarray)}
+np.savez_compressed(INV_OUTPUT / "SYNA_GCV_search.npz", **search_arrays)
+inverse_record = dict(
+    source_templates=["templates/SITE_Tikh.m", "templates/SITE_TikhPlot.m"],
+    invgridpar=invgridpar, invpar=invpar, runpar=invrunpar,
+    sitepar=site_inputs, fwdpar=fwdpar, initpar=initpar,
+    initialisation_cycles=initial["niter"], initial_state_fixed=True,
+    weight_residual=True, heatflow_experiment=heatflow_experiment,
+    stop_reason=inversion["stop_reason"], converged=inversion["converged"],
+    selected_regpar=inversion["regpar"],
+    weighted_rms=float(inversion["rms_iter"][-1]),
+    temperature_rmse_K=float(np.sqrt(np.mean(residual**2))),
+    versions=record["versions"],
+)
+(INV_OUTPUT / "SYNA_GCV_parameters.json").write_text(
+    json.dumps(inverse_record, indent=2, default=json_value), encoding="utf-8"
+)
+print(f"Inversion outputs: {INV_OUTPUT}")
+print("Results, starting/prior vectors, iteration CSV, recovered-GST CSV, "
+      "GCV search and parameter JSON saved.")
+
+
+# ## 14. Optional basal heat-flow experiment
+# To reproduce the **structure** of the template's heat-flow sweep, set
+# `heatflow_experiment["qb_values"]` in step 10 to a list of signed W/m² values.
+# The commented values are the original OKU experiment, not values inferred for A.
+#
+# For each value, rebuild the steady/periodic initial condition using that basal
+# heat flow, then invert with the same GST grid and controls. Each case writes to
+# its own folder. The combined figure accepts an explicit list of results rather
+# than loading every result file in the working directory.
+#
+
+# +
+sweep_results = []
+for qb in heatflow_experiment["qb_values"] or []:
+    if not np.isfinite(qb):
+        raise ValueError("Each basal heat-flow value must be finite.")
+    case_name = f"SYNA_qb_{qb*1000:+.3f}_mWm2"
+    case_site = dict(sitepar, qb=float(qb), name=case_name)
+    case_initial = build_initial(
+        case_site, fwdpar, dict(initpar, GST=forcing["GST"], it=forcing["it"])
+    )
+    case_result = run_inversion(
+        case_site, fwdpar, invpar, case_initial,
+        dict(invrunpar, name=case_name, outdir=INV_OUTPUT / case_name)
+    )
+    sweep_results.append(case_result)
+
+if sweep_results:
+    comparison = plot_inversion(
+        [inversion, *sweep_results],
+        dict(tikh_plotpar, name="SYNA_Qb_comparison")
+    )
+    display(comparison["figure"])
+    plt.close(comparison["figure"])
+else:
+    print("Basal heat-flow sweep disabled; the synthetic site's qb was used.")
+
+# -
+
+# ## 15. Configure MCMC — SITE_MCMC.m
+# The probabilistic stage uses the same 21-bin logarithmic GST grid as Tikhonov,
+# plus upward basal heat flow `QB` in mW/m² and heat production `H` in µW/m³.
+# The public interface remains dictionary-based.
+#
+# Settings retained from the template are DRAM, Gaussian proposal correlation
+# length 3, GST prior 1 ± 5 K, QB uncertainty 4 mW/m², H prior 1.5 ± 0.3 µW/m³,
+# three-standard-deviation bounds, delayed-rejection scale 2, sampled likelihood
+# variance, and the `pom=-4 K` initial-temperature offset. The template's
+# **OKU-specific QB mean of 31 mW/m² is replaced by this site's specified
+# `abs(qb)`**, 69.759 mW/m².
+#
+# `Pact` and sampling are distinct in the MATLAB source. The default samples H but
+# keeps it inactive in the physical objective. Its resulting distribution is
+# therefore prior-driven and is not evidence about heat production. QB is sampled
+# and physically active. The Gaussian MATLAB objective recalculates a steady
+# profile at `GST_1 + pom` for every proposal; it does not use the repeated-history
+# `Tinit`, although the workflow validates and records that profile.
+#
+# The 120-sample setting below is only an executable integration check. The
+# MATLAB DRAM production length, 250,000 samples per chain with adaptation every
+# 10,000 samples, is retained separately in the configuration.
+#
+
+# +
+from workflow import build_mcmc, run_mcmc, summarize_mcmc, plot_mcmc
+
+MCMC_OUTPUT = OUTPUT / "mcmc"
+mcmc_settings = dict(
+    method="dram", nsimu=120, adaptint=40, drscale=2.0,
+    gst_mean=1.0, gst_sigma=5.0,
+    # qb_mean omitted: build_mcmc derives abs(sitepar["qb"]) in mW/m².
+    qb_sigma=4.0, h_mean=1.5, h_sigma=0.3,
+    sample_qb=True, sample_h=True,
+    activate_qb=True, activate_h=False,
+    cutoff=3.0, start_scale=0.5,
+    covariance="gaussian", correlation_length=3.0,
+    measurement_sigma=0.1, updatesigma=True,
+    pom=-4.0, weighted=False, seed=11,
+    verbosity=0, waitbar=False,
+)
+mcmc_config = build_mcmc(sitepar, fwdpar, invpar, initial, mcmc_settings)
+print(f"Parameters: {len(mcmc_config['params'])}; "
+      f"sampled: {np.count_nonzero(mcmc_config['sampled'])}; "
+      f"physically active: {np.count_nonzero(mcmc_config['active'])}")
+print(f"QB prior: {mcmc_config['prior_mean'][invpar['nsteps']]:.3f} ± "
+      f"{mcmc_config['prior_sigma'][invpar['nsteps']]:.3f} mW/m²")
+print(f"Validation samples: {mcmc_config['nsimu']}; "
+      f"MATLAB production setting: {mcmc_config['production_nsimu']:,}")
+
+# -
+
+# ## 16. Run the short DRAM validation chain
+# `job` provides the reproducible sampler seed. Multiple independent job numbers
+# are needed for production convergence checks; one short chain cannot establish
+# mixing or convergence. `updatesigma=True` samples the unweighted likelihood
+# variance, matching the MATLAB objective. `Terr` is used later to report a
+# comparable uncertainty-normalised RMS; it is not applied twice in the likelihood.
+#
+
+validation_jobs = [11]
+mcmc_chains = [
+    run_mcmc(
+        sitepar, fwdpar, initial, mcmc_config,
+        dict(job=job, name="SYNA_DRAM_validation", outdir=MCMC_OUTPUT / "chains"),
+    )
+    for job in validation_jobs
+]
+print("Completed chain shapes:", [run["chain"].shape for run in mcmc_chains])
+
+
+# ## 17. Summarize and plot — SITE_MCMCPlot.m and SITE_Plot.m
+# The first quarter is discarded as validation burn-in. Posterior temperature and
+# observed-minus-calculated residual envelopes are evaluated for 24 retained draws.
+# The figure also shows GST credible intervals, QB and H densities, compact traces,
+# the uncertainty-normalised RMS distribution and sampled likelihood sigma.
+#
+# Corrections to the MATLAB plot scripts include removal of the arbitrary 13.5-year
+# time shift, correct QB/H/RMS labels, explicit positive-upward heat-flow units,
+# and no site-specific axis clipping. The bands are empirical chain quantiles; they
+# are not trustworthy uncertainty estimates for this deliberately short run.
+#
+
+# +
+mcmc_summary = summarize_mcmc(
+    mcmc_chains, sitepar, fwdpar, initial,
+    dict(burnin=0.25, thin=1, nsample=24, seed=12,
+         outdir=MCMC_OUTPUT, name="SYNA_DRAM_validation"),
+)
+print(f"Retained states: {mcmc_summary['nsample']}; "
+      f"successive-state acceptance ≈ {mcmc_summary['acceptance_fraction']:.3f}")
+print(f"QB median [95% interval]: {mcmc_summary['qb_quantiles'][2]:.3f} "
+      f"[{mcmc_summary['qb_quantiles'][0]:.3f}, "
+      f"{mcmc_summary['qb_quantiles'][4]:.3f}] mW/m²")
+print(f"Weighted-RMS median: {mcmc_summary['rms_quantiles'][2]:.4g}")
+print(f"Likelihood sigma median: "
+      f"{np.sqrt(np.median(mcmc_summary['s2chain'])):.4g} K")
+
+mcmc_plotpar = dict(
+    name="SYNA_DRAM_validation", outdir=MCMC_OUTPUT,
+    formats=("png", "pdf"), show=False, time_scale="symlog",
+    reference=dict(t=mesh["t"], GST=forcing["GST"], it=forcing["it"]),
+)
+mcmc_figure = plot_mcmc(mcmc_summary, mcmc_plotpar)
+display(mcmc_figure["figure"])
+plt.close(mcmc_figure["figure"])
+print("Saved figures:")
+for path in mcmc_figure["filenames"]:
+    print(path)
+
+# -
+
+# ## 18. Save posterior tables and retain production settings
+# The sampler writes each raw chain as NPZ; the summarizer writes retained chains,
+# predictions and residuals. The files below add a readable GST quantile table and
+# a JSON configuration record.
+#
+# For production, rebuild with `nsimu=250000` and `adaptint=10000`, run several
+# independent job numbers, and combine only after checking trace stability,
+# effective sample sizes and an across-chain statistic such as split R-hat. The
+# validation result is intentionally labelled so it is not mistaken for a
+# production posterior.
+#
+
+gst_rows = []
+for j in range(invpar["nsteps"]):
+    intervals = np.flatnonzero(invpar["it"][:-1] == j)
+    gst_rows.append((
+        j, -mesh["t"][intervals[0]] / YEAR2SEC,
+        -mesh["t"][intervals[-1] + 1] / YEAR2SEC,
+        *mcmc_summary["gst_quantiles"][:, j],
+    ))
+np.savetxt(
+    MCMC_OUTPUT / "SYNA_DRAM_validation_GST_quantiles.csv", gst_rows,
+    delimiter=",",
+    header="parameter,oldest_age_yr,youngest_age_yr,q025,q16,q50,q84,q975",
+    comments="",
+)
+mcmc_record = dict(
+    source_templates=["templates/SITE_MCMC.m", "templates/SITE_MCMCPlot.m",
+                      "templates/SITE_Plot.m"],
+    settings=mcmc_settings,
+    production_settings=dict(method="dram", nsimu=250000,
+                             adaptint=10000, drscale=2.0),
+    parameter_names=[item["name"] for item in mcmc_config["params"]],
+    sampled=mcmc_config["sampled"], physically_active=mcmc_config["active"],
+    prior_mean=mcmc_config["prior_mean"], prior_sigma=mcmc_config["prior_sigma"],
+    minimum=mcmc_config["minimum"], maximum=mcmc_config["maximum"],
+    proposal_covariance=mcmc_config["proposal_covariance"],
+    initial_profile_used=mcmc_config["initial_profile_used"],
+    burnin=mcmc_summary["burnin"], thin=mcmc_summary["thin"],
+    validation_jobs=validation_jobs,
+    retained_states=mcmc_summary["nsample"],
+    acceptance_fraction=mcmc_summary["acceptance_fraction"],
+    qb_quantiles_mW_m2=mcmc_summary["qb_quantiles"],
+    h_quantiles_uW_m3=mcmc_summary["h_quantiles"],
+    rms_quantiles=mcmc_summary["rms_quantiles"],
+    interpretation="Executable validation chain only; not a converged posterior.",
+    versions=record["versions"],
+)
+(MCMC_OUTPUT / "SYNA_DRAM_validation_parameters.json").write_text(
+    json.dumps(mcmc_record, indent=2, default=json_value), encoding="utf-8"
+)
+print(f"MCMC outputs: {MCMC_OUTPUT}")
+print("Raw chain, posterior summary, GST quantiles, figures and parameter JSON saved.")
+
+
+# ## 19. Switching to measured data
+# Change the data file, column mapping, depth range and uncertainty specification;
+# set `synthetic=False` and omit artificial noise. Update material properties,
+# basal heat flow, prescribed initialisation history and both inversion priors
+# explicitly. Retain a numerical depth of at least 5,000 m and extend it if needed.
+#
+# The current Tikhonov and MCMC adapters require diagonal observational covariance.
+# A correlated-noise inversion needs a whitening or full-covariance likelihood
+# before it can be run. Remove the known synthetic-forcing overlay for measured
+# data unless an independent comparison history is available.
+#
+# For MCMC, replace the short validation chain with several independent production
+# chains, discard burn-in, and inspect mixing, effective sample sizes and an
+# across-chain convergence statistic before interpreting credible intervals.
 #
