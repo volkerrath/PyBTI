@@ -13,8 +13,8 @@ addpath([srcpath,'/src']);
 addpath([srcpath,'/tools']);
 addpath([datpath]);
 % 
-% dfmt=1;ffmt='.zip';
-% archive(mfilename,strcat([mfilename '_' datestr(now,dfmt)]),ffmt);
+% archive([])
+
 
 % GENERAL SETTINGS
 
