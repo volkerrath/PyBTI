@@ -1,0 +1,62 @@
+SITE_Mesh.m / SITE_Fwd.m -> Python (mesh.py, fwd_driver.py)
+=============================================================
+Author: Claude (Anthropic), generated 2026-09-22. AI-generated; run
+end-to-end here only against a synthetic prep_fn/init_fn (see the
+__main__ block in fwd_driver.py and tests/test_fwd_driver.py), NOT
+against real borehole data or MATLAB output. Review before production use.
+
+DEPENDS ON (from your PyBTI.zip, unchanged, not re-shipped here)
+------------------------------------------------------------------
+phys.py, numeric.py, gsth_drivers.py -- put mesh.py and fwd_driver.py in
+the same directory as those three files.
+
+WHAT THIS COVERS
+-----------------
+SITE_Mesh.m  -> mesh.py       build_depth_mesh, build_time_mesh, build_meshes
+SITE_Fwd.m   -> fwd_driver.py run_fwd (orchestrator)
+Fwd_gsth.m   -> gsth_drivers.fwd_gsth (already in your PyBTI.zip; reused
+                unchanged, just called from run_fwd)
+
+"SITE" -> a real borehole name: nothing is hard-coded. run_fwd(name, ...)
+takes the borehole label as a plain string; `props` (the phys.py property
+set, e.g. "full"/"oku"/"ull") is a separate argument -- the MATLAB scripts
+are not always consistent about which of `site`/`props` carries which
+meaning, so the two are kept explicitly distinct here.
+
+NOT YET TRANSLATED (SITE_Prep.m, SITE_Init.m)
+------------------------------------------------
+run_fwd() takes the site-preparation and GST-initial-value steps as
+`prep_fn` / `init_fn` callables (documented in fwd_driver.run_fwd's
+docstring) rather than hard-coding them, since those two MATLAB scripts
+(347 and 260 lines) have not been translated yet. fwd_driver.py ships
+with `_demo_prep_fn` / `_demo_init_fn`, synthetic stand-ins used only to
+exercise run_fwd() end-to-end (see tests/test_fwd_driver.py) -- these are
+NOT translations of SITE_Prep.m / SITE_Init.m and must be replaced by the
+real ones (next deliverable) before running on an actual borehole.
+
+RUN THE TESTS
+-------------
+    python tests/test_fwd_driver.py
+    python fwd_driver.py            (prints a self-consistency check)
+
+SOURCE NOTES (SITE_Mesh.m)
+---------------------------
+- ztype='special'/'mixed': this MATLAB branch overrides its own
+  dzstart/gfac/ngen with fixed values (8.0, 1.02, 500), ignoring the
+  ones set earlier in the script; reproduced as-is (see mesh.py docstring).
+- ip and it as built here are the trivial identity arrays SITE_Mesh.m
+  itself produces (cell index, time-node index), not the cell->unit or
+  GST-parameter mappings used elsewhere (those come from SITE_Prep.m and
+  numeric.set_mgsth respectively).
+- tm (interval midpoints) is computed for every branch here; MATLAB only
+  computed it for ttype='log' and would error saving an undefined `tm`
+  for the other two branches.
+
+SOURCE NOTES (SITE_Fwd.m)
+---------------------------
+- `relaxnl` is carried in fwdpar in MATLAB but is not accepted by
+  heat1dns/heat1dnt in either the MATLAB source or numeric.py; kept here
+  as fwd.relaxnl_unused for the record, not passed into the solver.
+- `run_parallel`/`parcors` (MATLAB, for later parfor use) are not used by
+  SITE_Fwd.m itself and are not part of this driver; they belong with the
+  MCMC driver (SITE_MCMC.m, not yet translated).
