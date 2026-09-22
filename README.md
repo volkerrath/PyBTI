@@ -1,2 +1,2 @@
 # PyBTI
-Borehole temperature inversion
+Borehole Temperature Inversion
