@@ -43,14 +43,21 @@ from html import escape
 
 # Locate the repository from either its root or a subfolder.
 ROOT = next(
-    (p for p in (Path.cwd(), *Path.cwd().parents)
-     if (p / "workflow.py").is_file() and (p / "examples" / "A").is_dir()),
+    (
+        p
+        for p in (Path.cwd(), *Path.cwd().parents)
+        if (p / "workflow.py").is_file() and (p / "examples" / "A").is_dir()
+    ),
     None,
 )
 if ROOT is None:
-    raise RuntimeError("Start Jupyter in the PyBTI repository or one of its subfolders.")
+    raise RuntimeError(
+        "Start Jupyter in the PyBTI repository or one of its subfolders."
+    )
 if sys.version_info[:2] != (3, 12):
-    raise RuntimeError("Select the Python 3.12 (BTI) kernel, then restart this notebook.")
+    raise RuntimeError(
+        "Select the Python 3.12 (BTI) kernel, then restart this notebook."
+    )
 sys.path.insert(0, str(ROOT))
 
 # %matplotlib inline
@@ -65,8 +72,10 @@ from workflow import build_mesh, run_forward, plot_forward
 from init import YEAR2SEC, build_gsth, build_initial
 
 plt.rcParams.update({"figure.dpi": 110, "font.size": 10})
-print(f"Python {platform.python_version()} | NumPy {np.__version__} | "
-      f"SciPy {scipy.__version__} | Matplotlib {matplotlib.__version__}")
+print(
+    f"Python {platform.python_version()} | NumPy {np.__version__} | "
+    f"SciPy {scipy.__version__} | Matplotlib {matplotlib.__version__}"
+)
 print(f"Project: {ROOT}")
 
 # -
@@ -87,9 +96,9 @@ print(f"Project: {ROOT}")
 # +
 initpar = dict(
     init_type="periodic",  # CHANGE HERE: "equilibrium" or "periodic"
-    GST0=6.0,             # absolute surface temperature of the starting equilibrium [°C]
+    GST0=6.0,  # absolute surface temperature of the starting equilibrium [°C]
     initial_iter=30,
-    initial_tol=None,     # optional maximum-profile-change tolerance [K], e.g. 1e-3
+    initial_tol=None,  # optional maximum-profile-change tolerance [K], e.g. 1e-3
     verbose=False,
 )
 
@@ -100,26 +109,44 @@ forward_options = dict(run_after_periodic=False, show_residuals=True)
 DATA = ROOT / "examples" / "A"
 OUTPUT = DATA / "output" / "notebook" / initpar["init_type"]
 datapar = dict(
-    file=DATA / "DataBallingA.csv", zcol=0, Tcol=3, Terr=0.05,
-    depth_range=(10.0, 2000.0), synthetic=True,
+    file=DATA / "DataBallingA.csv",
+    zcol=0,
+    Tcol=3,
+    Terr=0.05,
+    depth_range=(10.0, 2000.0),
+    synthetic=True,
 )
 # Optional artificial noise; only allowed for synthetic data:
 # datapar["noise"] = dict(kind="gaussian", length=150.0, seed=0)
 
 meshpar = dict(
-    name="SYNA", min_depth=5000.0, depth=dict(zend=5000.0),
+    name="SYNA",
+    min_depth=5000.0,
+    depth=dict(zend=5000.0),
     time=dict(tstart=110000 * YEAR2SEC, tend=30 * YEAR2SEC, nt=401),
     time_nodes=[-70000 * YEAR2SEC, -10000 * YEAR2SEC],
 )
+
 site_inputs = dict(
-    name="SYNA", props="syn",
-    k=2.3253, r=1000.0, c=2500.0, h=0.0001e-6, p=0.0001,
-    kA=0.0, kB=0.0, qb=-0.069759,
+    name="SYNA",
+    props="syn",
+    k=2.3253,
+    r=1000.0,
+    c=2500.0,
+    h=0.0001e-6,
+    p=0.0001,
+    kA=0.0,
+    kB=0.0,
+    qb=-0.069759,
 )
+
 fwdpar = dict(theta=1.0, maxitnl=4, tolnl=1e-5, freeze=1)
 gstpar = dict(
-    file=DATA / "GSTHBallingA.csv", form="steps",
-    time_unit="yr", time_convention="before_reference", prehistory=6.0,
+    file=DATA / "GSTHBallingA.csv",
+    form="steps",
+    time_unit="yr",
+    time_convention="before_reference",
+    prehistory=6.0,
 )
 print(f"Initialisation: {initpar['init_type']}; output folder: {OUTPUT}")
 
@@ -138,18 +165,26 @@ print(f"Initialisation: {initpar['init_type']}; output folder: {OUTPUT}")
 
 # +
 observations = read_data(datapar)
-preview = np.column_stack((
-    observations["zobs"], observations["Tobs"], observations["Terr"]
-))
+preview = np.column_stack(
+    (observations["zobs"], observations["Tobs"], observations["Terr"])
+)
 print(f"File: {observations['file'].name}")
 print(f"Raw rows: {len(observations['raw'])}; retained rows: {len(preview)}")
 print("First five selected rows: depth [m], temperature [°C], uncertainty [K]")
 print(preview[:5])
 
 fig, ax = plt.subplots(figsize=(5, 5), layout="constrained")
-ax.errorbar(observations["Tobs"], observations["zobs"],
-            xerr=observations["Terr"], fmt=".", capsize=2, label="Selected input")
-ax.set(xlabel="Temperature (°C)", ylabel="Depth (m)", title="Synthetic input data")
+ax.errorbar(
+    observations["Tobs"],
+    observations["zobs"],
+    xerr=observations["Terr"],
+    fmt=".",
+    capsize=2,
+    label="Selected input",
+)
+ax.set(
+    xlabel="Temperature (°C)", ylabel="Depth (m)", title="Synthetic input data"
+)
 ax.invert_yaxis()
 ax.grid(alpha=0.25)
 ax.legend()
@@ -171,17 +206,29 @@ mesh_settings = dict(meshpar)
 mesh_settings["min_depth"] = max(5000.0, meshpar.get("min_depth", 0.0))
 mesh = build_mesh(mesh_settings, observations)
 assert mesh["z"][-1] >= 5000.0
-print(f"Depth: {mesh['z'][-1]:.0f} m; {mesh['nz']} depth nodes; "
-      f"{mesh['nt']} time nodes")
-print(f"Time span: {-mesh['t'][0] / YEAR2SEC:,.0f} years before reference to 0")
+print(
+    f"Depth: {mesh['z'][-1]:.0f} m; {mesh['nz']} depth nodes; "
+    f"{mesh['nt']} time nodes"
+)
+print(
+    f"Time span: {-mesh['t'][0] / YEAR2SEC:,.0f} years before reference to 0"
+)
 
 fig, axes = plt.subplots(1, 2, figsize=(10, 4.5), layout="constrained")
 axes[0].plot(mesh["dz"], mesh["zm"], ".-")
-axes[0].set(xlabel="Cell thickness (m)", ylabel="Depth (m)",
-            title="Depth mesh", ylim=(mesh["z"][-1], 0))
+axes[0].set(
+    xlabel="Cell thickness (m)",
+    ylabel="Depth (m)",
+    title="Depth mesh",
+    ylim=(mesh["z"][-1], 0),
+)
 axes[1].plot(-mesh["tm"] / YEAR2SEC, mesh["dt"] / YEAR2SEC, ".-")
-axes[1].set(xlabel="Time before reference (yr)", ylabel="Time step (yr)",
-            title="Time mesh", xlim=(-mesh["t"][0] / YEAR2SEC, 0))
+axes[1].set(
+    xlabel="Time before reference (yr)",
+    ylabel="Time step (yr)",
+    title="Time mesh",
+    xlim=(-mesh["t"][0] / YEAR2SEC, 0),
+)
 for ax in axes:
     ax.grid(alpha=0.25)
 plt.show()
@@ -211,8 +258,12 @@ rows = "".join(
     f"<td>{sitepar[key].max():.6g}</td><td>{escape(unit)}</td></tr>"
     for label, key, unit in property_rows
 )
-display(HTML("<table><tr><th>Property</th><th>Minimum</th><th>Maximum</th>"
-             "<th>Unit</th></tr>" + rows + "</table>"))
+display(
+    HTML(
+        "<table><tr><th>Property</th><th>Minimum</th><th>Maximum</th>"
+        "<th>Unit</th></tr>" + rows + "</table>"
+    )
+)
 print(f"Basal heat flow: {sitepar['qb']:.6g} W/m²")
 print(f"All {len(sitepar['id'])} retained data depths map to mesh nodes.")
 
@@ -232,11 +283,25 @@ applied_gst = forcing["GST"][forcing["it"][:-1]]
 age = -mesh["t"] / YEAR2SEC
 
 fig, ax = plt.subplots(figsize=(9, 3.5), layout="constrained")
-ax.step(age, np.r_[applied_gst, applied_gst[-1]], where="post", label="Applied GSTH")
-ax.scatter(-forcing["t_history"] / YEAR2SEC, forcing["T_history"],
-           color="tab:red", zorder=3, label="Source transitions")
-ax.set(xlabel="Time before reference (yr)", ylabel="Surface temperature (°C)",
-       title="Prescribed paleoclimate", xlim=(age[0], age[-1]))
+ax.step(
+    age,
+    np.r_[applied_gst, applied_gst[-1]],
+    where="post",
+    label="Applied GSTH",
+)
+ax.scatter(
+    -forcing["t_history"] / YEAR2SEC,
+    forcing["T_history"],
+    color="tab:red",
+    zorder=3,
+    label="Source transitions",
+)
+ax.set(
+    xlabel="Time before reference (yr)",
+    ylabel="Surface temperature (°C)",
+    title="Prescribed paleoclimate",
+    xlim=(age[0], age[-1]),
+)
 ax.grid(alpha=0.25)
 ax.legend()
 plt.show()
@@ -257,6 +322,7 @@ plt.show()
 # +
 cycle_display = None
 
+
 def display_cycle(figure):
     """Refresh one notebook output after each completed initialisation cycle."""
     global cycle_display
@@ -265,19 +331,30 @@ def display_cycle(figure):
     else:
         cycle_display.update(figure)
 
+
 initial_settings = dict(initpar, GST=forcing["GST"], it=forcing["it"])
 if initpar["init_type"] == "periodic":
     initial_settings["plotpar"] = dict(
-        outdir=OUTPUT / "cycles", show=False, dpi=120,
+        outdir=OUTPUT / "cycles",
+        show=False,
+        dpi=120,
         display_callback=display_cycle,
     )
 initial = build_initial(sitepar, fwdpar, initial_settings)
-print(f"Initialisation completed: {initial['init_type']}, {initial['niter']} cycles")
+print(
+    f"Initialisation completed: {initial['init_type']}, {initial['niter']} cycles"
+)
 if initial["niter"]:
     print(f"Last L2 change: {initial['change_l2'][-1]:.8g} K")
     print(f"Last maximum change: {initial['changes'][-1]:.8g} K")
-    print("Convergence:", "fixed cycle count; no stopping tolerance requested"
-          if initial["converged"] is None else initial["converged"])
+    print(
+        "Convergence:",
+        (
+            "fixed cycle count; no stopping tolerance requested"
+            if initial["converged"] is None
+            else initial["converged"]
+        ),
+    )
     print(f"Saved {len(initial['plot_files'])} cycle plots.")
     print(f"Diagnostics: {initial['monitor_plot']['diagnostics_file']}")
 
@@ -292,15 +369,31 @@ if initial["niter"]:
 # +
 fig, axes = plt.subplots(1, 2, figsize=(10, 4.5), layout="constrained")
 axes[0].step(age, np.r_[applied_gst, applied_gst[-1]], where="post")
-axes[0].set(xlabel="Time before reference (yr)", ylabel="Surface temperature (°C)",
-            title="Prescribed GSTH", xlim=(age[0], age[-1]))
-axes[1].plot(initial["Tsteady"], initial["zinit"], "--", color="0.5",
-             label="Starting equilibrium")
-axes[1].plot(initial["Tinit"], initial["zinit"], color="tab:red",
-             label="Generated initial profile")
-axes[1].set(xlabel="Temperature (°C)", ylabel="Depth (m)",
-            title=f"Initial state: {initial['init_type']}",
-            ylim=(mesh["z"][-1], 0))
+axes[0].set(
+    xlabel="Time before reference (yr)",
+    ylabel="Surface temperature (°C)",
+    title="Prescribed GSTH",
+    xlim=(age[0], age[-1]),
+)
+axes[1].plot(
+    initial["Tsteady"],
+    initial["zinit"],
+    "--",
+    color="0.5",
+    label="Starting equilibrium",
+)
+axes[1].plot(
+    initial["Tinit"],
+    initial["zinit"],
+    color="tab:red",
+    label="Generated initial profile",
+)
+axes[1].set(
+    xlabel="Temperature (°C)",
+    ylabel="Depth (m)",
+    title=f"Initial state: {initial['init_type']}",
+    ylim=(mesh["z"][-1], 0),
+)
 axes[1].legend()
 for ax in axes:
     ax.grid(alpha=0.25)
@@ -311,7 +404,9 @@ plt.show()
 if initial["niter"]:
     print("Cycle      L2 change [K]      Maximum change [K]")
     for cycle, l2, maximum in zip(
-        range(1, initial["niter"] + 1), initial["change_l2"], initial["changes"]
+        range(1, initial["niter"] + 1),
+        initial["change_l2"],
+        initial["changes"],
     ):
         print(f"{cycle:5d} {l2:18.8g} {maximum:23.8g}")
 
@@ -328,17 +423,28 @@ if initial["niter"]:
 #
 
 run_separate_forward = (
-    initial["init_type"] == "equilibrium" or forward_options["run_after_periodic"]
+    initial["init_type"] == "equilibrium"
+    or forward_options["run_after_periodic"]
 )
 result = None
-run = dict(name=sitepar["name"], mesh=mesh, site=sitepar,
-           fwd=fwdpar, init=initial, result=None)
+run = dict(
+    name=sitepar["name"],
+    mesh=mesh,
+    site=sitepar,
+    fwd=fwdpar,
+    init=initial,
+    result=None,
+)
 if run_separate_forward:
     result = run_forward(sitepar, fwdpar, initial)
     run["result"] = result
     forward_plot = plot_forward(
-        run, dict(outdir=OUTPUT / "forward", show=False,
-                  show_residuals=forward_options["show_residuals"])
+        run,
+        dict(
+            outdir=OUTPUT / "forward",
+            show=False,
+            show_residuals=forward_options["show_residuals"],
+        ),
     )
     display(forward_plot["figure"])
     plt.close(forward_plot["figure"])
@@ -358,14 +464,21 @@ else:
 
 # +
 arrays = dict(
-    z=mesh["z"], t=mesh["t"], GST=initial["GST"], it=initial["it"],
-    Tsteady=initial["Tsteady"], Tinit=initial["Tinit"], Tit=initial["Tit"],
-    change_l2=initial["change_l2"], changes=initial["changes"],
+    z=mesh["z"],
+    t=mesh["t"],
+    GST=initial["GST"],
+    it=initial["it"],
+    Tsteady=initial["Tsteady"],
+    Tinit=initial["Tinit"],
+    Tit=initial["Tit"],
+    change_l2=initial["change_l2"],
+    changes=initial["changes"],
 )
 if result is not None:
     arrays["Tcalc"] = result["Tcalc"]
 archive = OUTPUT / "SYNA_workflow.npz"
 np.savez_compressed(archive, **arrays)
+
 
 def json_value(value):
     """Convert paths and NumPy values for a readable parameter record."""
@@ -377,20 +490,37 @@ def json_value(value):
         return value.item()
     raise TypeError(f"Cannot serialise {type(value).__name__}")
 
+
 record = dict(
-    datapar=datapar, meshpar=mesh_settings, sitepar=site_inputs,
-    fwdpar=fwdpar, gstpar=gstpar, initpar=initpar,
+    datapar=datapar,
+    meshpar=mesh_settings,
+    sitepar=site_inputs,
+    fwdpar=fwdpar,
+    gstpar=gstpar,
+    initpar=initpar,
     forward_options=forward_options,
-    units=dict(depth="m", time="s relative to reference",
-               temperature="deg C", profile_change="K", heat_flow="W/m2"),
-    versions=dict(python=platform.python_version(), numpy=np.__version__,
-                  scipy=scipy.__version__, matplotlib=matplotlib.__version__),
-    completed_cycles=initial["niter"], converged=initial["converged"],
-    forward_run=result is not None, cycle_plot_files=initial["plot_files"],
+    units=dict(
+        depth="m",
+        time="s relative to reference",
+        temperature="deg C",
+        profile_change="K",
+        heat_flow="W/m2",
+    ),
+    versions=dict(
+        python=platform.python_version(),
+        numpy=np.__version__,
+        scipy=scipy.__version__,
+        matplotlib=matplotlib.__version__,
+    ),
+    completed_cycles=initial["niter"],
+    converged=initial["converged"],
+    forward_run=result is not None,
+    cycle_plot_files=initial["plot_files"],
 )
 settings_file = OUTPUT / "SYNA_parameters.json"
-settings_file.write_text(json.dumps(record, indent=2, default=json_value),
-                         encoding="utf-8")
+settings_file.write_text(
+    json.dumps(record, indent=2, default=json_value), encoding="utf-8"
+)
 with np.load(archive, allow_pickle=False) as saved:
     np.testing.assert_array_equal(saved["Tinit"], initial["Tinit"])
 print(f"Saved and checked: {archive}")
@@ -433,17 +563,32 @@ print(f"Parameter record: {settings_file}")
 from workflow import build_inversion, run_inversion, plot_inversion
 
 invgridpar = dict(
-    nsteps=21, base=0.0, tstart=110000 * YEAR2SEC, tend=30 * YEAR2SEC, gmode="log",
+    nsteps=21,
+    base=0.0,
+    tstart=110000 * YEAR2SEC,
+    tend=30 * YEAR2SEC,
+    gmode="log",
 )
 inv_settings = dict(
-    m_apr_set=1.0, m_ini_set=1.0,
-    diffmeth="FD", dp=0.001,
-    tol_solve=1e-5, maxiter_solve=32,
-    tol_inv=(1e-4, 1e-5), maxiter_inv=100,
-    reg_opt="GCV", start_regpar=5, modul_regpar=1,
-    regpar0=(1.0, 0.0, 0.0), regbase=(1.0, 1.0, 1.0),
-    reg0par=[0.01], reg1par=np.logspace(-3.0, 3.0, 48), reg2par=[0.0],
-    reg_shift=0, outsteps=False, seed=0,
+    m_apr_set=1.0,
+    m_ini_set=1.0,
+    diffmeth="FD",
+    dp=0.001,
+    tol_solve=1e-5,
+    maxiter_solve=32,
+    tol_inv=(1e-4, 1e-5),
+    maxiter_inv=100,
+    reg_opt="GCV",
+    start_regpar=5,
+    modul_regpar=1,
+    regpar0=(1.0, 0.0, 0.0),
+    regbase=(1.0, 1.0, 1.0),
+    reg0par=[0.01],
+    reg1par=np.logspace(-3.0, 3.0, 48),
+    reg2par=[0.0],
+    reg_shift=0,
+    outsteps=False,
+    seed=0,
 )
 invpar = build_inversion(mesh, invgridpar, inv_settings)
 INV_OUTPUT = OUTPUT / "tikhonov"
@@ -454,14 +599,20 @@ invrunpar = dict(outdir=INV_OUTPUT, name="SYNA_GCV", verbose=True, n_jobs=1)
 # heatflow_experiment["qb_values"] = [-36e-3, -38e-3, -40e-3, -42e-3, -44e-3]
 heatflow_experiment = dict(qb_values=None)
 
-print(f"Inversion: {invpar['nsteps']} GST parameters; "
-      f"{len(sitepar['Tobs'])} observations; qb={sitepar['qb']*1000:.3f} mW/m²")
-print("Integration intervals per parameter:",
-      np.bincount(invpar["it"][:-1], minlength=invpar["nsteps"]))
+print(
+    f"Inversion: {invpar['nsteps']} GST parameters; "
+    f"{len(sitepar['Tobs'])} observations; qb={sitepar['qb']*1000:.3f} mW/m²"
+)
+print(
+    "Integration intervals per parameter:",
+    np.bincount(invpar["it"][:-1], minlength=invpar["nsteps"]),
+)
 print(f"GCV candidates: {len(inv_settings['reg1par'])}")
 if np.any(sitepar["Tcov"] - np.diag(np.diag(sitepar["Tcov"]))):
-    raise ValueError("Tikhonov currently requires diagonal Tcov. "
-                     "Disable correlated synthetic noise or use independent noise.")
+    raise ValueError(
+        "Tikhonov currently requires diagonal Tcov. "
+        "Disable correlated synthetic noise or use independent noise."
+    )
 
 # -
 
@@ -484,10 +635,14 @@ inversion = run_inversion(sitepar, fwdpar, invpar, initial, invrunpar)
 residual = sitepar["Tobs"] - inversion["Tcalc"][sitepar["id"], -1]
 np.testing.assert_allclose(inversion["r_iter"][-1], residual)
 np.testing.assert_array_equal(inversion["m"], inversion["m_iter"][-1])
-print(f"Stop reason: {inversion['stop_reason']}; "
-      f"evaluated models: {inversion['niter']}")
-print(f"Weighted RMS: {inversion['rms_iter'][0]:.6g} → "
-      f"{inversion['rms_iter'][-1]:.6g}")
+print(
+    f"Stop reason: {inversion['stop_reason']}; "
+    f"evaluated models: {inversion['niter']}"
+)
+print(
+    f"Weighted RMS: {inversion['rms_iter'][0]:.6g} → "
+    f"{inversion['rms_iter'][-1]:.6g}"
+)
 print(f"Temperature RMSE: {np.sqrt(np.mean(residual**2)):.6g} K")
 print("Final weights (tau0, tau1, tau2):", inversion["regpar"])
 
@@ -498,9 +653,11 @@ if search:
     for j in range(3):
         values = np.unique(search["regpar"][:, j])
         if values.size > 1 and candidate[j] in (values[0], values[-1]):
-            print(f"GCV selected a boundary of the tau{j} search range "
-                  f"({candidate[j]:.6g}); consider extending that range "
-                  "before interpreting it as an interior optimum.")
+            print(
+                f"GCV selected a boundary of the tau{j} search range "
+                f"({candidate[j]:.6g}); consider extending that range "
+                "before interpreting it as an interior optimum."
+            )
 else:
     print("No GCV search was completed; check maxiter_inv and start_regpar.")
 
@@ -531,8 +688,12 @@ else:
 #
 
 tikh_plotpar = dict(
-    name="SYNA_GCV", outdir=INV_OUTPUT, formats=("png", "pdf"),
-    show=False, time_scale="symlog", smooth_window=21,
+    name="SYNA_GCV",
+    outdir=INV_OUTPUT,
+    formats=("png", "pdf"),
+    show=False,
+    time_scale="symlog",
+    smooth_window=21,
     reference=dict(t=mesh["t"], GST=forcing["GST"], it=forcing["it"]),
 )
 inversion_plot = plot_inversion(inversion, tikh_plotpar)
@@ -553,39 +714,61 @@ for path in inversion_plot["filenames"]:
 # to the returned final `m`, including when the iteration limit is reached.
 #
 
-iteration_table = np.column_stack((
-    np.arange(inversion["niter"]), inversion["rms_iter"],
-    inversion["theta_d_iter"], inversion["theta_m_iter"],
-    inversion["regpar_iter"],
-))
+iteration_table = np.column_stack(
+    (
+        np.arange(inversion["niter"]),
+        inversion["rms_iter"],
+        inversion["theta_d_iter"],
+        inversion["theta_m_iter"],
+        inversion["regpar_iter"],
+    )
+)
 np.savetxt(
-    INV_OUTPUT / "SYNA_GCV_iterations.csv", iteration_table, delimiter=",",
-    header="iteration,weighted_rms,theta_data,theta_model,tau0,tau1,tau2", comments="",
+    INV_OUTPUT / "SYNA_GCV_iterations.csv",
+    iteration_table,
+    delimiter=",",
+    header="iteration,weighted_rms,theta_data,theta_model,tau0,tau1,tau2",
+    comments="",
 )
 grid_rows = []
 for j in range(invpar["nsteps"]):
     intervals = np.flatnonzero(invpar["it"][:-1] == j)
-    grid_rows.append((
-        j, -mesh["t"][intervals[0]] / YEAR2SEC,
-        -mesh["t"][intervals[-1] + 1] / YEAR2SEC,
-        inversion["m"][j] + sitepar["gts"],
-        inversion["m_apr"][j] + sitepar["gts"],
-    ))
+    grid_rows.append(
+        (
+            j,
+            -mesh["t"][intervals[0]] / YEAR2SEC,
+            -mesh["t"][intervals[-1] + 1] / YEAR2SEC,
+            inversion["m"][j] + sitepar["gts"],
+            inversion["m_apr"][j] + sitepar["gts"],
+        )
+    )
 np.savetxt(
-    INV_OUTPUT / "SYNA_GCV_GST.csv", grid_rows, delimiter=",",
+    INV_OUTPUT / "SYNA_GCV_GST.csv",
+    grid_rows,
+    delimiter=",",
     header="parameter,oldest_age_yr,youngest_age_yr,recovered_GST_degC,prior_GST_degC",
     comments="",
 )
-search_arrays = {key: value for key, value in inversion["search"].items()
-                 if isinstance(value, np.ndarray)}
+search_arrays = {
+    key: value
+    for key, value in inversion["search"].items()
+    if isinstance(value, np.ndarray)
+}
 np.savez_compressed(INV_OUTPUT / "SYNA_GCV_search.npz", **search_arrays)
 inverse_record = dict(
     source_templates=["templates/SITE_Tikh.m", "templates/SITE_TikhPlot.m"],
-    invgridpar=invgridpar, invpar=invpar, runpar=invrunpar,
-    sitepar=site_inputs, fwdpar=fwdpar, initpar=initpar,
-    initialisation_cycles=initial["niter"], initial_state_fixed=True,
-    weight_residual=True, heatflow_experiment=heatflow_experiment,
-    stop_reason=inversion["stop_reason"], converged=inversion["converged"],
+    invgridpar=invgridpar,
+    invpar=invpar,
+    runpar=invrunpar,
+    sitepar=site_inputs,
+    fwdpar=fwdpar,
+    initpar=initpar,
+    initialisation_cycles=initial["niter"],
+    initial_state_fixed=True,
+    weight_residual=True,
+    heatflow_experiment=heatflow_experiment,
+    stop_reason=inversion["stop_reason"],
+    converged=inversion["converged"],
     selected_regpar=inversion["regpar"],
     weighted_rms=float(inversion["rms_iter"][-1]),
     temperature_rmse_K=float(np.sqrt(np.mean(residual**2))),
@@ -595,8 +778,10 @@ inverse_record = dict(
     json.dumps(inverse_record, indent=2, default=json_value), encoding="utf-8"
 )
 print(f"Inversion outputs: {INV_OUTPUT}")
-print("Results, starting/prior vectors, iteration CSV, recovered-GST CSV, "
-      "GCV search and parameter JSON saved.")
+print(
+    "Results, starting/prior vectors, iteration CSV, recovered-GST CSV, "
+    "GCV search and parameter JSON saved."
+)
 
 
 # ## 14. Optional basal heat-flow experiment
@@ -621,15 +806,18 @@ for qb in heatflow_experiment["qb_values"] or []:
         case_site, fwdpar, dict(initpar, GST=forcing["GST"], it=forcing["it"])
     )
     case_result = run_inversion(
-        case_site, fwdpar, invpar, case_initial,
-        dict(invrunpar, name=case_name, outdir=INV_OUTPUT / case_name)
+        case_site,
+        fwdpar,
+        invpar,
+        case_initial,
+        dict(invrunpar, name=case_name, outdir=INV_OUTPUT / case_name),
     )
     sweep_results.append(case_result)
 
 if sweep_results:
     comparison = plot_inversion(
         [inversion, *sweep_results],
-        dict(tikh_plotpar, name="SYNA_Qb_comparison")
+        dict(tikh_plotpar, name="SYNA_Qb_comparison"),
     )
     display(comparison["figure"])
     plt.close(comparison["figure"])
@@ -667,26 +855,46 @@ from workflow import build_mcmc, run_mcmc, summarize_mcmc, plot_mcmc
 
 MCMC_OUTPUT = OUTPUT / "mcmc"
 mcmc_settings = dict(
-    method="dram", nsimu=120, adaptint=40, drscale=2.0,
-    gst_mean=1.0, gst_sigma=5.0,
+    method="dram",
+    nsimu=120,
+    adaptint=40,
+    drscale=2.0,
+    gst_mean=1.0,
+    gst_sigma=5.0,
     # qb_mean omitted: build_mcmc derives abs(sitepar["qb"]) in mW/m².
-    qb_sigma=4.0, h_mean=1.5, h_sigma=0.3,
-    sample_qb=True, sample_h=True,
-    activate_qb=True, activate_h=False,
-    cutoff=3.0, start_scale=0.5,
-    covariance="gaussian", correlation_length=3.0,
-    measurement_sigma=0.1, updatesigma=True,
-    pom=-4.0, weighted=False, seed=11,
-    verbosity=0, waitbar=False,
+    qb_sigma=4.0,
+    h_mean=1.5,
+    h_sigma=0.3,
+    sample_qb=True,
+    sample_h=True,
+    activate_qb=True,
+    activate_h=False,
+    cutoff=3.0,
+    start_scale=0.5,
+    covariance="gaussian",
+    correlation_length=3.0,
+    measurement_sigma=0.1,
+    updatesigma=True,
+    pom=-4.0,
+    weighted=False,
+    seed=11,
+    verbosity=0,
+    waitbar=False,
 )
 mcmc_config = build_mcmc(sitepar, fwdpar, invpar, initial, mcmc_settings)
-print(f"Parameters: {len(mcmc_config['params'])}; "
-      f"sampled: {np.count_nonzero(mcmc_config['sampled'])}; "
-      f"physically active: {np.count_nonzero(mcmc_config['active'])}")
-print(f"QB prior: {mcmc_config['prior_mean'][invpar['nsteps']]:.3f} ± "
-      f"{mcmc_config['prior_sigma'][invpar['nsteps']]:.3f} mW/m²")
-print(f"Validation samples: {mcmc_config['nsimu']}; "
-      f"MATLAB production setting: {mcmc_config['production_nsimu']:,}")
+print(
+    f"Parameters: {len(mcmc_config['params'])}; "
+    f"sampled: {np.count_nonzero(mcmc_config['sampled'])}; "
+    f"physically active: {np.count_nonzero(mcmc_config['active'])}"
+)
+print(
+    f"QB prior: {mcmc_config['prior_mean'][invpar['nsteps']]:.3f} ± "
+    f"{mcmc_config['prior_sigma'][invpar['nsteps']]:.3f} mW/m²"
+)
+print(
+    f"Validation samples: {mcmc_config['nsimu']}; "
+    f"MATLAB production setting: {mcmc_config['production_nsimu']:,}"
+)
 
 # -
 
@@ -701,8 +909,13 @@ print(f"Validation samples: {mcmc_config['nsimu']}; "
 validation_jobs = [11]
 mcmc_chains = [
     run_mcmc(
-        sitepar, fwdpar, initial, mcmc_config,
-        dict(job=job, name="SYNA_DRAM_validation", outdir=MCMC_OUTPUT / "chains"),
+        sitepar,
+        fwdpar,
+        initial,
+        mcmc_config,
+        dict(
+            job=job, name="SYNA_DRAM_validation", outdir=MCMC_OUTPUT / "chains"
+        ),
     )
     for job in validation_jobs
 ]
@@ -723,22 +936,40 @@ print("Completed chain shapes:", [run["chain"].shape for run in mcmc_chains])
 
 # +
 mcmc_summary = summarize_mcmc(
-    mcmc_chains, sitepar, fwdpar, initial,
-    dict(burnin=0.25, thin=1, nsample=24, seed=12,
-         outdir=MCMC_OUTPUT, name="SYNA_DRAM_validation"),
+    mcmc_chains,
+    sitepar,
+    fwdpar,
+    initial,
+    dict(
+        burnin=0.25,
+        thin=1,
+        nsample=24,
+        seed=12,
+        outdir=MCMC_OUTPUT,
+        name="SYNA_DRAM_validation",
+    ),
 )
-print(f"Retained states: {mcmc_summary['nsample']}; "
-      f"successive-state acceptance ≈ {mcmc_summary['acceptance_fraction']:.3f}")
-print(f"QB median [95% interval]: {mcmc_summary['qb_quantiles'][2]:.3f} "
-      f"[{mcmc_summary['qb_quantiles'][0]:.3f}, "
-      f"{mcmc_summary['qb_quantiles'][4]:.3f}] mW/m²")
+print(
+    f"Retained states: {mcmc_summary['nsample']}; "
+    f"successive-state acceptance ≈ {mcmc_summary['acceptance_fraction']:.3f}"
+)
+print(
+    f"QB median [95% interval]: {mcmc_summary['qb_quantiles'][2]:.3f} "
+    f"[{mcmc_summary['qb_quantiles'][0]:.3f}, "
+    f"{mcmc_summary['qb_quantiles'][4]:.3f}] mW/m²"
+)
 print(f"Weighted-RMS median: {mcmc_summary['rms_quantiles'][2]:.4g}")
-print(f"Likelihood sigma median: "
-      f"{np.sqrt(np.median(mcmc_summary['s2chain'])):.4g} K")
+print(
+    f"Likelihood sigma median: "
+    f"{np.sqrt(np.median(mcmc_summary['s2chain'])):.4g} K"
+)
 
 mcmc_plotpar = dict(
-    name="SYNA_DRAM_validation", outdir=MCMC_OUTPUT,
-    formats=("png", "pdf"), show=False, time_scale="symlog",
+    name="SYNA_DRAM_validation",
+    outdir=MCMC_OUTPUT,
+    formats=("jpg", "pdf"),
+    show=False,
+    time_scale="symlog",
     reference=dict(t=mesh["t"], GST=forcing["GST"], it=forcing["it"]),
 )
 mcmc_figure = plot_mcmc(mcmc_summary, mcmc_plotpar)
@@ -765,30 +996,42 @@ for path in mcmc_figure["filenames"]:
 gst_rows = []
 for j in range(invpar["nsteps"]):
     intervals = np.flatnonzero(invpar["it"][:-1] == j)
-    gst_rows.append((
-        j, -mesh["t"][intervals[0]] / YEAR2SEC,
-        -mesh["t"][intervals[-1] + 1] / YEAR2SEC,
-        *mcmc_summary["gst_quantiles"][:, j],
-    ))
+    gst_rows.append(
+        (
+            j,
+            -mesh["t"][intervals[0]] / YEAR2SEC,
+            -mesh["t"][intervals[-1] + 1] / YEAR2SEC,
+            *mcmc_summary["gst_quantiles"][:, j],
+        )
+    )
 np.savetxt(
-    MCMC_OUTPUT / "SYNA_DRAM_validation_GST_quantiles.csv", gst_rows,
+    MCMC_OUTPUT / "SYNA_DRAM_validation_GST_quantiles.csv",
+    gst_rows,
     delimiter=",",
     header="parameter,oldest_age_yr,youngest_age_yr,q025,q16,q50,q84,q975",
     comments="",
 )
 mcmc_record = dict(
-    source_templates=["templates/SITE_MCMC.m", "templates/SITE_MCMCPlot.m",
-                      "templates/SITE_Plot.m"],
+    source_templates=[
+        "templates/SITE_MCMC.m",
+        "templates/SITE_MCMCPlot.m",
+        "templates/SITE_Plot.m",
+    ],
     settings=mcmc_settings,
-    production_settings=dict(method="dram", nsimu=250000,
-                             adaptint=10000, drscale=2.0),
+    production_settings=dict(
+        method="dram", nsimu=250000, adaptint=10000, drscale=2.0
+    ),
     parameter_names=[item["name"] for item in mcmc_config["params"]],
-    sampled=mcmc_config["sampled"], physically_active=mcmc_config["active"],
-    prior_mean=mcmc_config["prior_mean"], prior_sigma=mcmc_config["prior_sigma"],
-    minimum=mcmc_config["minimum"], maximum=mcmc_config["maximum"],
+    sampled=mcmc_config["sampled"],
+    physically_active=mcmc_config["active"],
+    prior_mean=mcmc_config["prior_mean"],
+    prior_sigma=mcmc_config["prior_sigma"],
+    minimum=mcmc_config["minimum"],
+    maximum=mcmc_config["maximum"],
     proposal_covariance=mcmc_config["proposal_covariance"],
     initial_profile_used=mcmc_config["initial_profile_used"],
-    burnin=mcmc_summary["burnin"], thin=mcmc_summary["thin"],
+    burnin=mcmc_summary["burnin"],
+    thin=mcmc_summary["thin"],
     validation_jobs=validation_jobs,
     retained_states=mcmc_summary["nsample"],
     acceptance_fraction=mcmc_summary["acceptance_fraction"],
@@ -802,7 +1045,9 @@ mcmc_record = dict(
     json.dumps(mcmc_record, indent=2, default=json_value), encoding="utf-8"
 )
 print(f"MCMC outputs: {MCMC_OUTPUT}")
-print("Raw chain, posterior summary, GST quantiles, figures and parameter JSON saved.")
+print(
+    "Raw chain, posterior summary, GST quantiles, figures and parameter JSON saved."
+)
 
 
 # ## 19. Switching to measured data
